@@ -1,29 +1,43 @@
 # AdditDownloader
 
-`AdditDownloader` is a small Python CLI for managing a local registry of downloadable apps and generating a simple window-cask scaffold.
+`AdditDownloader` is a small Python CLI for registering local files and copying
+them into your current directory.
 
 ## Commands
 
-- `additdownloader mk <name> <url>` or `additdownloader add <name> <url>` to add an app to the registry
-- - `additdownloader dwnd <name>` or `additdownloader download <name>` to download a registered app
-  - - `additdownloader window_cask <name>` or `additdownloader install-window <name>` to generate a window-cask file scaffold
-   
-    - ## Install
-   
-    - From source:
-   
-    - ```bash
-      python3 addit.py --help
-      ```
+- `additdownloader help` shows the guided help screen
+- `additdownloader mkf <file>` registers a local file path
+- `additdownloader install <name>` copies a registered file into your directory
 
-      If you want an installable command, use the `pyproject.toml` entry point:
+Compatibility aliases:
 
-      ```bash
-      python3 -m pip install .
-      ```
+- `additdownloader mk <file>`
+- `additdownloader download <name>`
+- `additdownloader dwnd <name>`
 
-      ## Notes
+## Install
 
-      - Registry data is stored in `registry.json` in the current working directory.
-      - - `registry.json` is local runtime state and should not be committed.
-        - 
+From source:
+
+```bash
+python3 addit.py help
+```
+
+Install as a command:
+
+```bash
+python3 -m pip install .
+```
+
+Homebrew tap:
+
+```bash
+brew tap marzio-cloud/AdditDownloader
+brew install additdownloader
+```
+
+## Notes
+
+- Registry data is stored in `registry.json` in the current working directory.
+- `registry.json` is local runtime state and should not be committed.
+
