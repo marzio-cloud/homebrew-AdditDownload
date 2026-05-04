@@ -2,13 +2,9 @@
 #!/usr/bin/env python3
 """AdditDownloader CLI.
 
-This tool keeps a tiny local registry of app names and download URLs, downloads
-registered apps, and can generate a Homebrew cask scaffold for GUI apps.
-
-Command aliases:
-- add / mk
-- download / dwnd
-- install-window / window_cask
+This tool keeps a tiny local registry of files, lets you register a file by
+dropping it into the command, copies registered files into your current
+directory, and prints a guided help screen.
 """
 
 from __future__ import annotations
@@ -16,8 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 
@@ -25,170 +19,190 @@ REGISTRY_FILE = Path("registry.json")
 
 
 def load_registry() -> dict[str, dict[str, str]]:
-      if REGISTRY_FILE.exists():
-                try:
-                              with REGISTRY_FILE.open("r", encoding="utf-8") as file:
-                                                data = json.load(file)
-                                            if isinstance(data, dict):
-                                                              return data
-                except json.JSONDecodeError:
-                              pass
-                      return {}
+    if REGISTRY_FILE.exists():
+        try:
+            with REGISTRY_FILE.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return {}
 
 
 def save_registry(data: dict[str, dict[str, str]]) -> None:
-      with REGISTRY_FILE.open("w", encoding="utf-8") as file:
-                json.dump(data, file, indent=4, sort_keys=True)
-                file.write("\n")
+    with REGISTRY_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, sort_keys=True)
+        file.write("\n")
 
 
-def add_app(name: str, url: str) -> None:
-      registry = load_registry()
-      registry[name] = {"url": url}
-      save_registry(registry)
-      print(f" Successfully added '{name}' to the AdditDownloader registry!")
-
-
-def _filename_from_url(url: str, fallback: str) -> str:
-      parsed = urllib.parse.urlparse(url)
-      filename = Path(parsed.path).name
-      if filename:
-                return filename
-            return fallback
-
-
-def _download_to_path(url: str, destination: Path) -> None:
-      destination.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as response, destination.open("wb") as file:
-              shutil.copyfileobj(response, file)
-
-
-def download_app(name: str, destination: str | None = None) -> None:
-      registry = load_registry()
-    if name not in registry:
-              print(f" Error: '{name}' not found. Please add it first.")
-              return
-
-    url = registry[name]["url"]
-    target_dir = Path(destination) if destination else Path.cwd()
-    target_name = _filename_from_url(url, name)
-    target_path = target_dir / target_name
-
-    print(f" Downloading '{name}' from {url}...")
-    try:
-              _download_to_path(url, target_path)
-except Exception as exc:  # pragma: no cover - user-facing error path
-        print(f" Download failed: {exc}")
+def register_file(source: str) -> None:
+    source_path = Path(source).expanduser()
+    if not source_path.exists():
+        print(f"❌ Error: '{source}' was not found.")
+        return
+    if source_path.is_dir():
+        print(f"❌ Error: '{source}' is a directory. Please drop a file.")
         return
 
-    print(f" Download complete: {target_path}")
+    resolved = source_path.resolve()
+    registry = load_registry()
+    registry[source_path.name] = {"source": str(resolved)}
+    save_registry(registry)
+    print(f"✅ Registered '{source_path.name}' from {resolved}")
 
 
-def _slugify(name: str) -> str:
-      slug = []
-    for char in name.lower():
-              if char.isalnum():
-                            slug.append(char)
-elif char in {" ", "-", "_", "."}:
-            slug.append("-")
-    result = "".join(slug).strip("-")
-    return result or "app"
+def _resolve_source(name: str) -> Path | None:
+    registry = load_registry()
+    entry = registry.get(name)
+    if isinstance(entry, dict):
+        source = entry.get("source")
+        if source:
+            candidate = Path(source)
+            if candidate.exists():
+                return candidate
+
+    candidate = Path(name).expanduser()
+    if candidate.exists() and candidate.is_file():
+        return candidate
+
+    return None
 
 
-def install_window(name: str, output_dir: str | None = None) -> None:
-      registry = load_registry()
-    if name not in registry:
-              print(f" Error: '{name}' not found. Please add it first.")
-              return
+def install_file(name: str, destination: str | None = None, force: bool = False) -> None:
+    source = _resolve_source(name)
+    if source is None:
+        print(f"❌ Error: '{name}' is not registered. Run 'additdownloader mkf <file>' first.")
+        return
 
-    url = registry[name]["url"]
-    cask_dir = Path(output_dir) if output_dir else Path("Casks")
-    cask_dir.mkdir(parents=True, exist_ok=True)
-    cask_path = cask_dir / f"{_slugify(name)}.rb"
+    target_dir = Path(destination).expanduser() if destination else Path.cwd()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / source.name
 
-    template = f'''cask "{_slugify(name)}" do
-      version "latest"
-        sha256 :no_check
-          url "{url}"
-            name "{name}"
-              desc "Window cask scaffold generated by AdditDownloader"
-                homepage "https://github.com/marzio-cloud/AdditDownloader"
+    if source.resolve() == target_path.resolve():
+        print(f"📦 '{source.name}' is already in {target_dir}")
+        return
 
-                  app "{name}.app"
-                  end
-                  '''
+    if target_path.exists() and not force:
+        print(f"❌ Error: '{target_path}' already exists. Use --force to replace it.")
+        return
 
-    cask_path.write_text(template, encoding="utf-8")
-    print(f" Generated window cask scaffold at {cask_path}")
+    shutil.copy2(source, target_path)
+    print(f"📦 Installed '{source.name}' to {target_path}")
+
+
+def show_help() -> None:
+    print(
+        """AdditDownloader
+
+What it does
+- Register a local file with `mkf`
+- Install a registered file with `install`
+- Show this help with `help`
+
+Examples
+  additdownloader mkf ./MyFile.zip
+  additdownloader install MyFile.zip
+  additdownloader help
+
+Notes
+- Files are tracked in `registry.json` in the current working directory.
+- `mk` and `download` remain as compatibility aliases.
+"""
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
-      parser = argparse.ArgumentParser(
-          description="AdditDownloader - manage a local app registry, downloads, and window cask scaffolds."
-)
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    parser_add = subparsers.add_parser("add", help="Add a new app to the registry")
-    parser_add.add_argument("name", help="The name of the app")
-    parser_add.add_argument("url", help="The download URL for the app")
-
-    parser_mk = subparsers.add_parser("mk", help="Alias for add")
-    parser_mk.add_argument("name", help="The name of the app")
-    parser_mk.add_argument("url", help="The download URL for the app")
-
-    parser_download = subparsers.add_parser("download", help="Download an app")
-    parser_download.add_argument("name", help="The name of the app to download")
-    parser_download.add_argument(
-              "--dest",
-              default=None,
-              help="Optional destination directory for the downloaded file",
+    parser = argparse.ArgumentParser(
+        prog="additdownloader",
+        description="Register local files and install them into your directory.",
     )
+    subparsers = parser.add_subparsers(dest="command")
 
-    parser_dwnd = subparsers.add_parser("dwnd", help="Alias for download")
-    parser_dwnd.add_argument("name", help="The name of the app to download")
-    parser_dwnd.add_argument(
-              "--dest",
-              default=None,
-              help="Optional destination directory for the downloaded file",
-    )
+    parser_help = subparsers.add_parser("help", help="Show the guided help screen")
+    parser_help.set_defaults(func=lambda args: show_help())
 
-    parser_install = subparsers.add_parser(
-              "install-window", help="Generate a Homebrew cask scaffold for a windowed app"
+    parser_mkf = subparsers.add_parser("mkf", help="Register a local file")
+    parser_mkf.add_argument("source", help="Path to the file to register")
+    parser_mkf.set_defaults(func=lambda args: register_file(args.source))
+
+    parser_mk = subparsers.add_parser(
+        "mk",
+        help=argparse.SUPPRESS,
+        description="Compatibility alias for mkf.",
     )
-    parser_install.add_argument("name", help="The name of the app to generate a cask for")
+    parser_mk.add_argument("source", help="Path to the file to register")
+    parser_mk.set_defaults(func=lambda args: register_file(args.source))
+
+    parser_install = subparsers.add_parser("install", help="Install a registered file")
+    parser_install.add_argument("name", help="Registered file name to install")
     parser_install.add_argument(
-              "--output",
-              default=None,
-              help="Optional directory to write the cask file into",
+        "--dest",
+        default=None,
+        help="Optional destination directory. Defaults to the current directory.",
+    )
+    parser_install.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace the file if it already exists.",
+    )
+    parser_install.set_defaults(
+        func=lambda args: install_file(args.name, args.dest, args.force)
     )
 
-    parser_window_cask = subparsers.add_parser(
-              "window_cask", help="Alias for install-window"
+    parser_download = subparsers.add_parser(
+        "download",
+        help=argparse.SUPPRESS,
+        description="Compatibility alias for install.",
     )
-    parser_window_cask.add_argument("name", help="The name of the app to generate a cask for")
-    parser_window_cask.add_argument(
-              "--output",
-              default=None,
-              help="Optional directory to write the cask file into",
+    parser_download.add_argument("name", help="Registered file name to install")
+    parser_download.add_argument(
+        "--dest",
+        default=None,
+        help="Optional destination directory. Defaults to the current directory.",
+    )
+    parser_download.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace the file if it already exists.",
+    )
+    parser_download.set_defaults(
+        func=lambda args: install_file(args.name, args.dest, args.force)
+    )
+
+    parser_dwnd = subparsers.add_parser(
+        "dwnd",
+        help=argparse.SUPPRESS,
+        description="Compatibility alias for install.",
+    )
+    parser_dwnd.add_argument("name", help="Registered file name to install")
+    parser_dwnd.add_argument(
+        "--dest",
+        default=None,
+        help="Optional destination directory. Defaults to the current directory.",
+    )
+    parser_dwnd.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace the file if it already exists.",
+    )
+    parser_dwnd.set_defaults(
+        func=lambda args: install_file(args.name, args.dest, args.force)
     )
 
     return parser
 
 
 def main() -> None:
-      parser = build_parser()
-      args = parser.parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
 
-    if args.command in {"add", "mk"}:
-              add_app(args.name, args.url)
-elif args.command in {"download", "dwnd"}:
-          download_app(args.name, args.dest)
-elif args.command in {"install-window", "window_cask"}:
-          install_window(args.name, args.output)
-else:
-          parser.print_help()
+    if not hasattr(args, "func"):
+        show_help()
+        return
+
+    args.func(args)
 
 
 if __name__ == "__main__":
-      main()
-  
+    main()
