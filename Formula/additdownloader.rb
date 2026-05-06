@@ -2,6 +2,7 @@ class Additdownloader < Formula
   desc "File registry and installer CLI"
   homepage "https://github.com/marzio-cloud/AdditDownloader"
   url "https://raw.githubusercontent.com/marzio-cloud/AdditDownloader/main/addit.py"
+  version "1.0.0"
   sha256 "8eb98bb40d7c9ceca8df0a06368bd0bd658d32c1e1106abbb32dc6d936ec7bec"
 
   depends_on "python@3.13"
